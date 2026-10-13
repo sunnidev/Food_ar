@@ -29,6 +29,18 @@ final GoRouter appRouter = GoRouter(
       },
     ),
     GoRoute(
+      path: '/ar',
+      name: 'ar_custom',
+      builder: (context, state) {
+        final initialFood = state.extra is FoodItem ? state.extra as FoodItem : null;
+        final foodId = state.uri.queryParameters['id'];
+        return ArScreen(
+          foodId: foodId,
+          initialFood: initialFood,
+        );
+      },
+    ),
+    GoRoute(
       path: '/ar/:id',
       name: 'ar_viewer',
       builder: (context, state) {
