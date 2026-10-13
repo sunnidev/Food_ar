@@ -39,8 +39,8 @@ class FoodCard extends ConsumerWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          // Open AR inspection screen
-          context.push('/ar/${food.id}', extra: food);
+          // Open dish detail screen
+          context.push('/food/${food.id}', extra: food);
         },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,28 +51,31 @@ class FoodCard extends ConsumerWidget {
                 SizedBox(
                   height: 140,
                   width: double.infinity,
-                  child: CachedNetworkImage(
-                    imageUrl: food.thumbnailUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(
-                      color: isDark ? const Color(0xFF232733) : const Color(0xFFF2ECE4),
-                      child: Center(
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.primary.withValues(alpha: 0.6),
+                  child: Hero(
+                    tag: 'food_thumbnail_${food.id}',
+                    child: CachedNetworkImage(
+                      imageUrl: food.thumbnailUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        color: isDark ? const Color(0xFF232733) : const Color(0xFFF2ECE4),
+                        child: Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: theme.colorScheme.primary.withValues(alpha: 0.6),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    errorWidget: (context, url, error) => Container(
-                      color: isDark ? const Color(0xFF232733) : const Color(0xFFF2ECE4),
-                      child: Icon(
-                        Icons.fastfood_outlined,
-                        size: 36,
-                        color: isDark ? Colors.grey[600] : Colors.grey[400],
+                      errorWidget: (context, url, error) => Container(
+                        color: isDark ? const Color(0xFF232733) : const Color(0xFFF2ECE4),
+                        child: Icon(
+                          Icons.fastfood_outlined,
+                          size: 36,
+                          color: isDark ? Colors.grey[600] : Colors.grey[400],
+                        ),
                       ),
                     ),
                   ),
