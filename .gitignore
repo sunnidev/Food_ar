@@ -1,0 +1,146 @@
+# ==============================================================================
+# Flutter & Dart Build & Cache Artifacts
+# ==============================================================================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+/coverage/
+pubspec-overrides.yaml
+
+# ==============================================================================
+# IDEs & Code Editors
+# ==============================================================================
+# Visual Studio Code
+.vscode/
+
+# IntelliJ IDEA / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+*.ipr
+out/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# ==============================================================================
+# Operating System Junk & Temporary Files
+# ==============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.cab
+*.msi
+*.msm
+*.msp
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# Miscellaneous & Logs
+*.class
+*.log
+*.pyc
+*.swp
+*.bak
+*.tmp
+*.temp
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================================================================
+# Secrets, Environment & Keys
+# ==============================================================================
+.env
+.env.*
+!.env.example
+key.properties
+*.keystore
+*.jks
+
+# ==============================================================================
+# Symbolication & Obfuscation
+# ==============================================================================
+app.*.symbols
+app.*.map.json
+
+# ==============================================================================
+# Android Specific Artifacts
+# ==============================================================================
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/android/captures/
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/.cxx/
+**/android/gradle/wrapper/gradle-wrapper.jar
+*.apk
+*.aab
+*.ap_
+
+# ==============================================================================
+# iOS & macOS Specific Artifacts
+# ==============================================================================
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/Pods/
+**/ios/.symlinks/
+**/DerivedData/
+**/xcuserdata/
+*.mode1v3
+*.mode2v3
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+!default.mode1v3
+!default.mode2v3
+!default.pbxuser
+!default.perspectivev3

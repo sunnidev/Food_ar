@@ -1,0 +1,98 @@
+[
+  {
+    "id": "food_1",
+    "name": "Fresh Haas Avocado",
+    "description": "Organic, perfectly ripe California Haas avocado. Nutrient-dense, creamy texture, rich in healthy fats and potassium. Served sliced or whole.",
+    "price": 4.99,
+    "category": "Healthy",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Avocado/glTF-Binary/Avocado.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 7.5,
+      "depth": 7.5,
+      "height": 11.0
+    },
+    "isAvailable": true
+  },
+  {
+    "id": "food_2",
+    "name": "Artisan Margherita Pizza",
+    "description": "Authentic wood-fired Neapolitan pizza crafted with San Marzano tomatoes, fresh buffalo mozzarella, fragrant basil leaves, and cold-pressed extra virgin olive oil.",
+    "price": 16.75,
+    "category": "Pizza",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://raw.githubusercontent.com/needle-engine/ar-restaurant-example/main/Website/static/assets/pizza.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 28.0,
+      "depth": 28.0,
+      "height": 3.0
+    },
+    "isAvailable": true
+  },
+  {
+    "id": "food_3",
+    "name": "Sashimi Nigiri Platter",
+    "description": "Chef selection of premium sashimi-grade Atlantic salmon and bluefin tuna delicately draped over hand-pressed seasoned sushi rice with wasabi.",
+    "price": 18.50,
+    "category": "Asian",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1611143669185-af224c5e3252?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://raw.githubusercontent.com/needle-engine/ar-restaurant-example/main/Website/static/assets/nigiri.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 18.0,
+      "depth": 12.0,
+      "height": 4.0
+    },
+    "isAvailable": true
+  },
+  {
+    "id": "food_4",
+    "name": "Belgian Chocolate Marshmallow",
+    "description": "Decadent Valrhona dark chocolate mousse layered with toasted fluffy marshmallows, dusted with cocoa powder and drizzled with warm cocoa ganache.",
+    "price": 12.99,
+    "category": "Desserts",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://raw.githubusercontent.com/needle-engine/ar-restaurant-example/main/Website/static/assets/chocolateMarshmallow.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 14.0,
+      "depth": 14.0,
+      "height": 8.5
+    },
+    "isAvailable": true
+  },
+  {
+    "id": "food_5",
+    "name": "Barista Specialty Espresso Machine",
+    "description": "Precision single-origin Ethiopian extraction station. Experience the art of hand-pulled espresso with notes of bergamot, jasmine, and dark honey.",
+    "price": 6.50,
+    "category": "Beverages",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1517668808822-9ebb02f2a0e6?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://modelviewer.dev/shared-assets/models/coffeemat.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 22.0,
+      "depth": 18.0,
+      "height": 32.0
+    },
+    "isAvailable": true
+  },
+  {
+    "id": "food_6",
+    "name": "Alpine Botanical Spring Infusion",
+    "description": "Pure alpine mineral water infused with hand-picked mint, cucumber ribbons, and Meyer lemon zest. Served chilled in an eco-glass decanter.",
+    "price": 5.25,
+    "category": "Beverages",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=800&q=80",
+    "modelUrl": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/WaterBottle/glTF-Binary/WaterBottle.glb",
+    "modelUrlIos": null,
+    "realWorldSizeCm": {
+      "width": 7.5,
+      "depth": 7.5,
+      "height": 26.0
+    },
+    "isAvailable": true
+  }
+]
