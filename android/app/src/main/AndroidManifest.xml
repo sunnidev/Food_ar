@@ -16,6 +16,11 @@
             android:name="com.google.ar.core"
             android:value="optional" />
 
+        <!-- Disable Impeller on Android to fix WebGL framebuffer incomplete errors on Mali/Unisoc devices -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

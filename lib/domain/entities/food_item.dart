@@ -14,6 +14,8 @@ class FoodItem {
   final String? modelUrlIos; // USDZ 3D model URL for iOS Quick Look (optional)
   final RealWorldSize realWorldSizeCm;
   final bool isAvailable;
+  final List<String> pairsWith; // IDs of complementary dishes/beverages
+  final int version; // 3D model version for intelligent cache invalidation
 
   const FoodItem({
     required this.id,
@@ -26,10 +28,28 @@ class FoodItem {
     this.modelUrlIos,
     required this.realWorldSizeCm,
     this.isAvailable = true,
+    this.pairsWith = const [],
+    this.version = 1,
   });
 
   /// Formatted price with dollar currency symbol
   String get formattedPrice => '\$${price.toStringAsFixed(2)}';
+
+  /// Model cache key combining ID and version
+  String get modelCacheKey => 'model_${id}_v$version';
+
+  /// Horizontal footprint area occupied on the table surface in cm²
+  double get footprintAreaCm2 {
+    return 3.141592653589793 * (realWorldSizeCm.width / 2.0) * (realWorldSizeCm.depth / 2.0);
+  }
+
+  /// Physical radial boundary in real-world meters for overlap and collision checks
+  double get footprintRadiusMeters {
+    final maxDim = realWorldSizeCm.width > realWorldSizeCm.depth
+        ? realWorldSizeCm.width
+        : realWorldSizeCm.depth;
+    return (maxDim / 2.0) / 100.0;
+  }
 
   FoodItem copyWith({
     String? id,
@@ -42,6 +62,8 @@ class FoodItem {
     String? modelUrlIos,
     RealWorldSize? realWorldSizeCm,
     bool? isAvailable,
+    List<String>? pairsWith,
+    int? version,
   }) {
     return FoodItem(
       id: id ?? this.id,
@@ -54,6 +76,8 @@ class FoodItem {
       modelUrlIos: modelUrlIos ?? this.modelUrlIos,
       realWorldSizeCm: realWorldSizeCm ?? this.realWorldSizeCm,
       isAvailable: isAvailable ?? this.isAvailable,
+      pairsWith: pairsWith ?? this.pairsWith,
+      version: version ?? this.version,
     );
   }
 
@@ -71,7 +95,9 @@ class FoodItem {
           modelUrl == other.modelUrl &&
           modelUrlIos == other.modelUrlIos &&
           realWorldSizeCm == other.realWorldSizeCm &&
-          isAvailable == other.isAvailable;
+          isAvailable == other.isAvailable &&
+          listEquals(pairsWith, other.pairsWith) &&
+          version == other.version;
 
   @override
   int get hashCode =>
@@ -84,8 +110,10 @@ class FoodItem {
       modelUrl.hashCode ^
       modelUrlIos.hashCode ^
       realWorldSizeCm.hashCode ^
-      isAvailable.hashCode;
+      isAvailable.hashCode ^
+      version.hashCode ^
+      Object.hashAll(pairsWith);
 
   @override
-  String toString() => 'FoodItem(id: $id, name: $name, price: $price, category: $category)';
+  String toString() => 'FoodItem(id: $id, name: $name, price: $price, version: $version)';
 }

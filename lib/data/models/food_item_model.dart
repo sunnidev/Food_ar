@@ -14,6 +14,8 @@ class FoodItemModel extends FoodItem {
     super.modelUrlIos,
     required super.realWorldSizeCm,
     super.isAvailable,
+    super.pairsWith,
+    super.version,
   });
 
   factory FoodItemModel.fromJson(Map<String, dynamic> json) {
@@ -30,6 +32,11 @@ class FoodItemModel extends FoodItem {
           ? RealWorldSize.fromJson(json['realWorldSizeCm'] as Map<String, dynamic>)
           : const RealWorldSize(width: 15.0, depth: 15.0, height: 10.0),
       isAvailable: json['isAvailable'] as bool? ?? true,
+      pairsWith: (json['pairsWith'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      version: (json['version'] as num?)?.toInt() ?? 1,
     );
   }
 
@@ -45,6 +52,8 @@ class FoodItemModel extends FoodItem {
       'modelUrlIos': modelUrlIos,
       'realWorldSizeCm': realWorldSizeCm.toJson(),
       'isAvailable': isAvailable,
+      'pairsWith': pairsWith,
+      'version': version,
     };
   }
 
@@ -60,6 +69,8 @@ class FoodItemModel extends FoodItem {
       modelUrlIos: entity.modelUrlIos,
       realWorldSizeCm: entity.realWorldSizeCm,
       isAvailable: entity.isAvailable,
+      pairsWith: entity.pairsWith,
+      version: entity.version,
     );
   }
 }

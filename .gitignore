@@ -84,6 +84,8 @@ migrate_working_dir/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+node_modules/
+**/node_modules/
 
 # ==============================================================================
 # Secrets, Environment & Keys

@@ -1,12 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../data/repositories/mock_food_repository.dart';
+import '../../../data/repositories/remote_food_repository.dart';
 import '../../../domain/entities/food_item.dart';
 import '../../../domain/repositories/food_repository.dart';
 
+/// Notifier flag controlling whether mock repository is forced (e.g. offline/testing).
+class UseMockApiNotifier extends Notifier<bool> {
+  @override
+  bool build() => false; // Default: use RemoteFoodRepository with Dio
+
+  void setUseMock(bool value) => state = value;
+  void toggle() => state = !state;
+}
+
+final useMockApiProvider = NotifierProvider<UseMockApiNotifier, bool>(
+  UseMockApiNotifier.new,
+);
+
 /// Provider for the FoodRepository contract.
+/// Dynamically supplies RemoteFoodRepository (with Dio) or MockFoodRepository based on flag.
 final foodRepositoryProvider = Provider<FoodRepository>((ref) {
-  return MockFoodRepository();
+  final forceMock = ref.watch(useMockApiProvider);
+  if (forceMock) {
+    return MockFoodRepository();
+  }
+  return RemoteFoodRepository();
 });
 
 /// AsyncNotifier managing the full food items dataset and refresh lifecycle.
@@ -49,6 +68,23 @@ final selectedCategoryProvider =
   SelectedCategoryNotifier.new,
 );
 
+/// Computed Provider returning unique list of food categories plus 'All'.
+final categoriesProvider = Provider<List<String>>((ref) {
+  final foodsAsync = ref.watch(foodListProvider);
+  return foodsAsync.maybeWhen(
+    data: (foods) {
+      final list = <String>[AppConstants.categoryAll];
+      for (final f in foods) {
+        if (!list.contains(f.category)) {
+          list.add(f.category);
+        }
+      }
+      return list;
+    },
+    orElse: () => AppConstants.defaultCategories,
+  );
+});
+
 /// Computed Provider filtering dishes based on selected category.
 final filteredFoodsProvider = Provider<AsyncValue<List<FoodItem>>>((ref) {
   final foodsAsync = ref.watch(foodListProvider);
@@ -58,25 +94,7 @@ final filteredFoodsProvider = Provider<AsyncValue<List<FoodItem>>>((ref) {
     if (selectedCategory == AppConstants.categoryAll) {
       return foods;
     }
-    return foods
-        .where((item) =>
-            item.category.trim().toLowerCase() ==
-            selectedCategory.trim().toLowerCase())
-        .toList();
+    return foods.where((food) => food.category == selectedCategory).toList();
   });
 });
 
-/// Computes the unique categories available based on actual loaded items.
-final categoriesProvider = Provider<List<String>>((ref) {
-  final foodsAsync = ref.watch(foodListProvider);
-  return foodsAsync.maybeWhen(
-    data: (foods) {
-      final categories = <String>{AppConstants.categoryAll};
-      for (final f in foods) {
-        categories.add(f.category);
-      }
-      return categories.toList();
-    },
-    orElse: () => AppConstants.defaultCategories,
-  );
-});

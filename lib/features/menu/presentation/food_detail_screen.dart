@@ -25,18 +25,12 @@ class FoodDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
-  int _retryKey = 0;
+  final int _retryKey = 0;
   bool _hasModelError = false;
   bool _isModelLoading = true;
+  bool _show3dModel = false;
   int _orderQuantity = 1;
 
-  void _retryModelLoading() {
-    setState(() {
-      _hasModelError = false;
-      _isModelLoading = true;
-      _retryKey++;
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -119,8 +113,8 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
               width: double.infinity,
               child: Stack(
                 children: [
-                  // 3D Model Canvas or Fallback Image
-                  if (!_hasModelError)
+                  // 3D Model Canvas or Hero Food Image
+                  if (_show3dModel && !_hasModelError)
                     Positioned.fill(
                       child: Container(
                         color: isDark ? const Color(0xFF161922) : const Color(0xFFF4EEE6),
@@ -131,10 +125,7 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                           src: food.modelUrl,
                           iosSrc: food.modelUrlIos,
                           alt: '3D real-scale model of ${food.name}',
-                          ar: true,
-                          arModes: const ['scene-viewer', 'webxr', 'quick-look'],
-                          arScale: ArScale.fixed,
-                          arPlacement: ArPlacement.floor,
+                          ar: false,
                           autoRotate: true,
                           autoRotateDelay: 1200,
                           cameraControls: true,
@@ -143,7 +134,6 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                           exposure: 1.0,
                           loading: Loading.eager,
                           onWebViewCreated: (_) {
-                            // Delay dismissal of loading indicator for smooth transition
                             Future.delayed(const Duration(milliseconds: 1400), () {
                               if (mounted) {
                                 setState(() => _isModelLoading = false);
@@ -154,7 +144,7 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                       ),
                     )
                   else
-                    // Fallback Image with Hero transition if 3D model failed to load
+                    // High-res Food Image with 3D Preview button
                     Positioned.fill(
                       child: Container(
                         color: isDark ? const Color(0xFF161922) : const Color(0xFFF4EEE6),
@@ -168,47 +158,22 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                                 fit: BoxFit.cover,
                               ),
                             ),
-                            Container(
-                              color: Colors.black.withValues(alpha: 0.55),
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(
-                                    Icons.error_outline_rounded,
-                                    color: Color(0xFFFFB300),
-                                    size: 44,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    '3D Model Failed to Load',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Please verify your internet connection or check if GLB asset is accessible.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.85),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  FilledButton.icon(
-                                    onPressed: _retryModelLoading,
-                                    icon: const Icon(Icons.refresh, size: 18),
-                                    label: const Text('Retry Loading 3D'),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: theme.colorScheme.primary,
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 18, vertical: 10),
-                                    ),
-                                  ),
-                                ],
+                            Positioned(
+                              bottom: 16,
+                              right: 16,
+                              child: FilledButton.tonalIcon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.black.withValues(alpha: 0.65),
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _show3dModel = true;
+                                    _isModelLoading = true;
+                                  });
+                                },
+                                icon: const Icon(Icons.view_in_ar, size: 18, color: Color(0xFFFFB300)),
+                                label: const Text('View 3D Model'),
                               ),
                             ),
                           ],
@@ -250,33 +215,47 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                       ),
                     ),
 
-                  // Floating 3D / AR Controls Pill Badge
+                  // Floating "Place on Table in AR" Action Button
                   Positioned(
                     top: 14,
                     right: 14,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.75),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15),
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.view_in_ar, size: 15, color: Color(0xFFFFB300)),
-                          SizedBox(width: 5),
-                          Text(
-                            'AR 3D Interactive',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => context.push('/ar', extra: food),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFFF5722), Color(0xFFFF9800)],
                             ),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFFF5722).withValues(alpha: 0.4),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                        ],
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                              SizedBox(width: 6),
+                              Text(
+                                'View on Table (AR)',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -303,10 +282,38 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
             ),
 
             // =================================================================
+            // Primary AR Table Action Button (Right under 3D viewer)
+            // =================================================================
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: FilledButton.icon(
+                onPressed: () => context.push('/ar', extra: food),
+                icon: const Icon(Icons.table_restaurant_rounded, size: 22),
+                label: const Text(
+                  'Open AR Camera • Place on Table',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF5722),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 3,
+                ),
+              ),
+            ),
+
+            // =================================================================
             // AR Device Support Banner
             // =================================================================
             Container(
-              margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: isDark
@@ -478,19 +485,115 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
                       color: isDark ? Colors.grey[400] : Colors.grey[700],
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 22),
+
+                  // Chef's Recommended Pairings (pairsWith)
+                  if (food.pairsWith.isNotEmpty) ...[
+                    const Row(
+                      children: [
+                        Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFFFFB300)),
+                        SizedBox(width: 6),
+                        Text(
+                          "Chef's Recommended Pairings",
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    foodsAsync.when(
+                      data: (allFoods) {
+                        final pairings = allFoods.where((f) => food.pairsWith.contains(f.id)).toList();
+                        if (pairings.isEmpty) return const SizedBox.shrink();
+
+                        return SizedBox(
+                          height: 76,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: pairings.length,
+                            separatorBuilder: (context, index) => const SizedBox(width: 10),
+                            itemBuilder: (context, index) {
+                              final pair = pairings[index];
+                              return InkWell(
+                                onTap: () => context.push('/food/${pair.id}', extra: pair),
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  width: 180,
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF1E2230) : Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isDark ? Colors.white12 : Colors.black12,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: SizedBox(
+                                          width: 48,
+                                          height: 48,
+                                          child: CachedNetworkImage(
+                                            imageUrl: pair.thumbnailUrl,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              pair.name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              pair.formattedPrice,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: theme.colorScheme.primary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (error, stack) => const SizedBox.shrink(),
+                    ),
+                    const SizedBox(height: 22),
+                  ],
 
                   // =============================================================
-                  // "Add to Table" Button (Disabled for Phase 3)
+                  // "Place Dish on Table in AR" Button
                   // =============================================================
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      // Disabled for now as requested
-                      // TODO (Phase 3): Implement multi-model AR anchor placement on real table surface
-                      onPressed: null,
+                      onPressed: () {
+                        context.push('/ar', extra: food);
+                      },
                       icon: const Icon(Icons.table_restaurant_outlined, size: 20),
-                      label: const Text('Add to Table (Phase 3)'),
+                      label: const Text('Place Dish on Table (AR)'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(

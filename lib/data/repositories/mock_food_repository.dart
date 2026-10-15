@@ -5,7 +5,8 @@ import '../../domain/entities/food_item.dart';
 import '../../domain/repositories/food_repository.dart';
 import '../models/food_item_model.dart';
 
-/// Concrete repository implementation loading local mock data from assets/foods.json.
+/// Concrete repository implementation loading local mock data from assets/foods.json
+/// and simulating order placements offline or during testing.
 class MockFoodRepository implements FoodRepository {
   final String assetPath;
   List<FoodItem>? _cachedFoods;
@@ -15,7 +16,7 @@ class MockFoodRepository implements FoodRepository {
   @override
   Future<List<FoodItem>> getFoods() async {
     // Simulate brief network latency for realistic UX feel and pull-to-refresh feedback
-    await Future.delayed(const Duration(milliseconds: 550));
+    await Future.delayed(const Duration(milliseconds: 400));
 
     try {
       final jsonString = await rootBundle.loadString(assetPath);
@@ -50,5 +51,24 @@ class MockFoodRepository implements FoodRepository {
       uniqueCategories.add(item.category);
     }
     return uniqueCategories.toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>> submitOrder(Map<String, dynamic> orderPayload) async {
+    // Simulate kitchen dispatch latency
+    await Future.delayed(const Duration(milliseconds: 650));
+
+    final timestamp = DateTime.now();
+    final orderId = 'ORD-${timestamp.millisecondsSinceEpoch.toString().substring(7)}';
+
+    return {
+      'success': true,
+      'orderId': orderId,
+      'status': 'received',
+      'mode': 'offline_mock',
+      'createdAt': timestamp.toIso8601String(),
+      'estimatedPrepMinutes': 18,
+      ...orderPayload,
+    };
   }
 }

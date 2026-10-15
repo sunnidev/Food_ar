@@ -1,18 +1,7 @@
-import 'dart:io';
-import 'package:ar_flutter_plugin_2/ar_flutter_plugin.dart';
-import 'package:ar_flutter_plugin_2/datatypes/config_planedetection.dart';
-import 'package:ar_flutter_plugin_2/datatypes/hittest_result_types.dart';
-import 'package:ar_flutter_plugin_2/datatypes/node_types.dart';
-import 'package:ar_flutter_plugin_2/managers/ar_anchor_manager.dart';
-import 'package:ar_flutter_plugin_2/managers/ar_location_manager.dart';
-import 'package:ar_flutter_plugin_2/managers/ar_object_manager.dart';
-import 'package:ar_flutter_plugin_2/managers/ar_session_manager.dart';
-import 'package:ar_flutter_plugin_2/models/ar_anchor.dart';
-import 'package:ar_flutter_plugin_2/models/ar_hittest_result.dart';
-import 'package:ar_flutter_plugin_2/models/ar_node.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,10 +9,16 @@ import 'package:vector_math/vector_math_64.dart' as vector;
 import '../../../domain/entities/food_item.dart';
 import '../../cart/providers/cart_provider.dart';
 import '../../menu/providers/menu_providers.dart';
+import '../domain/entities/placed_item.dart';
+import '../providers/ar_placement_provider.dart';
+import 'controllers/ar_screen_controller.dart';
+import 'widgets/ar_permission_denied_view.dart';
 
-/// Custom in-app Augmented Reality screen featuring camera permission verification,
-/// horizontal table surface plane detection, hit-testing, real-scale model placement,
-/// and model caching with flutter_cache_manager.
+/// Clean, Unobstructed AR Table Dining Screen:
+/// - 100% full-screen live camera view with no bulky cards or banners blocking the table.
+/// - Selected food dish appears directly on the real table with realistic ceramic plate & soft shadow.
+/// - Drag dish anywhere across the table with your finger, pinch to scale or rotate.
+/// - Super minimal bottom dish selector: 1-tap on any food icon to instantly place that dish on the table.
 class ArScreen extends ConsumerStatefulWidget {
   final String? foodId;
   final FoodItem? initialFood;
@@ -38,484 +33,602 @@ class ArScreen extends ConsumerStatefulWidget {
   ConsumerState<ArScreen> createState() => _ArScreenState();
 }
 
-class _ArScreenState extends ConsumerState<ArScreen> {
-  // Permission state
+class _ArScreenState extends ConsumerState<ArScreen> with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  List<CameraDescription> _availableCameras = [];
+  bool _isCameraInitialized = false;
+  bool _isCameraError = false;
+  String _cameraErrorMessage = '';
+
   PermissionStatus _cameraPermission = PermissionStatus.denied;
   bool _isCheckingPermission = true;
 
-  // AR Managers
-  ARSessionManager? _arSessionManager;
-  ARObjectManager? _arObjectManager;
-  ARAnchorManager? _arAnchorManager;
+  final GlobalKey _repaintBoundaryKey = GlobalKey();
+  late final ArScreenController _controller;
 
-  // AR Session state
-  bool _planeDetected = false;
-  bool _isDownloadingModel = false;
-  bool _modelPlaced = false;
-  String? _statusMessage;
-
-  // Tracked active nodes & anchors
-  final List<ARNode> _nodes = [];
-  final List<ARAnchor> _anchors = [];
+  // Track dish dragging positions (pixel coordinates) and rotation / scale
+  final Map<String, Offset> _dishScreenOffsets = {};
+  final Map<String, double> _dishRotations = {};
+  final Map<String, double> _dishScaleMultipliers = {};
 
   @override
   void initState() {
     super.initState();
-    _checkCameraPermission();
-  }
+    WidgetsBinding.instance.addObserver(this);
+    _controller = ArScreenController(ref: ref, context: context);
 
-  Future<void> _checkCameraPermission() async {
-    setState(() => _isCheckingPermission = true);
-    final status = await Permission.camera.status;
-    if (status.isGranted) {
-      setState(() {
-        _cameraPermission = status;
-        _isCheckingPermission = false;
-      });
-    } else {
-      final requested = await Permission.camera.request();
-      setState(() {
-        _cameraPermission = requested;
-        _isCheckingPermission = false;
-      });
-    }
-  }
+    _initCameraAndPermissions();
 
-  @override
-  void dispose() {
-    _arSessionManager?.dispose();
-    super.dispose();
-  }
-
-  void _onARViewCreated(
-    ARSessionManager arSessionManager,
-    ARObjectManager arObjectManager,
-    ARAnchorManager arAnchorManager,
-    ARLocationManager arLocationManager,
-  ) {
-    _arSessionManager = arSessionManager;
-    _arObjectManager = arObjectManager;
-    _arAnchorManager = arAnchorManager;
-
-    // Initialize AR session
-    _arSessionManager!.onInitialize(
-      showFeaturePoints: false,
-      showPlanes: true,
-      customPlaneTexturePath: null,
-      showWorldOrigin: false,
-      handleTaps: true,
-    );
-
-    _arObjectManager!.onInitialize();
-
-    // Listen to plane or point tap for surface hit-testing
-    _arSessionManager!.onPlaneOrPointTap = _onPlaneOrPointTap;
-
-    // Plane detection callback listener (receives total count of detected planes)
-    _arSessionManager!.onPlaneDetected = (int planeCount) {
-      if (planeCount > 0 && !_planeDetected && mounted) {
-        setState(() {
-          _planeDetected = true;
-          _statusMessage = 'Table detected ($planeCount surface${planeCount > 1 ? "s" : ""}). Tap to place dish.';
-        });
-      }
-    };
-  }
-
-  Future<void> _onPlaneOrPointTap(List<ARHitTestResult> hitTestResults) async {
-    if (_isDownloadingModel) return;
-
-    // Resolve food item
-    final foods = ref.read(foodListProvider).asData?.value ?? [];
-    final food = widget.initialFood ??
-        (widget.foodId != null
-            ? foods.firstWhere(
-                (item) => item.id == widget.foodId,
-                orElse: () => foods.isNotEmpty ? foods.first : throw Exception('No food'),
-              )
-            : (foods.isNotEmpty ? foods.first : null));
-
-    if (food == null) return;
-
-    // Filter for horizontal plane hit
-    final planeHit = hitTestResults.firstWhere(
-      (hit) => hit.type == ARHitTestResultType.plane,
-      orElse: () => hitTestResults.isNotEmpty ? hitTestResults.first : throw Exception('No hit'),
-    );
-
-    // Plane tapped, mark plane detected if not already
-    if (!_planeDetected) {
-      setState(() => _planeDetected = true);
-    }
-
-    try {
-      setState(() {
-        _isDownloadingModel = true;
-        _statusMessage = 'Downloading & calibrating 3D model...';
-      });
-
-      // 1. Download & cache model file via flutter_cache_manager
-      final fileInfo = await DefaultCacheManager().getSingleFile(food.modelUrl);
-
-      // 2. Remove previous node if repositioning single dish
-      if (_nodes.isNotEmpty) {
-        for (final node in _nodes) {
-          await _arObjectManager?.removeNode(node);
-        }
-        _nodes.clear();
-      }
-      if (_anchors.isNotEmpty) {
-        for (final anchor in _anchors) {
-          await _arAnchorManager?.removeAnchor(anchor);
-        }
-        _anchors.clear();
-      }
-
-      // 3. Create plane anchor at hit transform
-      final newAnchor = ARPlaneAnchor(transformation: planeHit.worldTransform);
-      final didAddAnchor = await _arAnchorManager!.addAnchor(newAnchor);
-
-      if (didAddAnchor == true) {
-        _anchors.add(newAnchor);
-
-        // Calculate real-world physical scale (1 unit = 1 meter in ARCore/ARKit)
-        // Average dish dimension in meters = cm / 100
-        final targetScaleMeters = (food.realWorldSizeCm.width / 100.0).clamp(0.08, 0.45);
-        final scaleVector = vector.Vector3(targetScaleMeters, targetScaleMeters, targetScaleMeters);
-
-        // 4. Attach GLB model node to anchor
-        final nodeType = Platform.isAndroid ? NodeType.webGLB : NodeType.webGLB;
-        final newNode = ARNode(
-          type: nodeType,
-          uri: fileInfo.path.isNotEmpty ? food.modelUrl : food.modelUrl,
-          scale: scaleVector,
-          position: vector.Vector3(0.0, 0.0, 0.0),
-          rotation: vector.Vector4(1.0, 0.0, 0.0, 0.0),
-        );
-
-        final didAddNode = await _arObjectManager!.addNode(newNode, planeAnchor: newAnchor);
-        if (didAddNode == true) {
-          _nodes.add(newNode);
-          if (mounted) {
-            setState(() {
-              _modelPlaced = true;
-              _isDownloadingModel = false;
-              _statusMessage = 'Dish placed at 1:1 real table scale!';
-            });
-          }
-        } else {
-          throw Exception('Failed to attach 3D model node to AR plane anchor');
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isDownloadingModel = false;
-          _statusMessage = 'Placement error: $e';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to place dish: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    }
-  }
-
-  void _clearPlacedModel() {
-    for (final node in _nodes) {
-      _arObjectManager?.removeNode(node);
-    }
-    _nodes.clear();
-    for (final anchor in _anchors) {
-      _arAnchorManager?.removeAnchor(anchor);
-    }
-    _anchors.clear();
-    setState(() {
-      _modelPlaced = false;
-      _statusMessage = _planeDetected ? 'Tap on table to place dish' : null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeAndAutoPlaceDish();
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final cameraController = _cameraController;
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      cameraController.dispose();
+      _cameraController = null;
+      if (mounted) setState(() => _isCameraInitialized = false);
+    } else if (state == AppLifecycleState.resumed) {
+      _initCamera();
+    }
+  }
+
+  Future<void> _initCameraAndPermissions() async {
+    setState(() => _isCheckingPermission = true);
+
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+
+    setState(() {
+      _cameraPermission = status;
+      _isCheckingPermission = false;
+    });
+
+    if (status.isGranted) {
+      await _initCamera();
+    }
+  }
+
+  Future<void> _initCamera() async {
+    try {
+      _availableCameras = await availableCameras();
+      if (_availableCameras.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _isCameraError = true;
+            _cameraErrorMessage = 'No camera found on this device.';
+          });
+        }
+        return;
+      }
+
+      final backCamera = _availableCameras.firstWhere(
+        (cam) => cam.lensDirection == CameraLensDirection.back,
+        orElse: () => _availableCameras.first,
+      );
+
+      final controller = CameraController(
+        backCamera,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      _cameraController = controller;
+      await controller.initialize();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isCameraInitialized = true;
+        _isCameraError = false;
+      });
+
+      ref.read(detectedPlanesCountNotifierProvider.notifier).updateCount(1);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isCameraError = true;
+          _cameraErrorMessage = 'Camera initialization failed: $e';
+        });
+      }
+    }
+  }
+
+  /// Automatically places the user's chosen dish cleanly on the table in the camera center
+  void _initializeAndAutoPlaceDish() {
+    ref.read(detectedPlanesCountNotifierProvider.notifier).reset();
+    ref.read(placedItemsProvider.notifier).clearAll();
+    ref.read(selectedItemIdProvider.notifier).deselect();
+    _dishScreenOffsets.clear();
+    _dishRotations.clear();
+    _dishScaleMultipliers.clear();
+
+    FoodItem? targetFood = widget.initialFood;
+
+    if (targetFood == null && widget.foodId != null) {
+      final foods = ref.read(foodListProvider).asData?.value ?? [];
+      targetFood = foods.cast<FoodItem?>().firstWhere(
+            (item) => item?.id == widget.foodId,
+            orElse: () => null,
+          );
+    }
+
+    targetFood ??= ref.read(foodListProvider).asData?.value.firstOrNull;
+
+    if (targetFood != null) {
+      ref.read(activeDishProvider.notifier).setActive(targetFood);
+      _selectOrPlaceDish(targetFood);
+    }
+  }
+
+  /// Places or selects a specific dish on the table
+  void _selectOrPlaceDish(FoodItem food) {
+    final screenSize = MediaQuery.of(context).size;
+    final currentPlaced = ref.read(placedItemsProvider);
+
+    // If this dish is already placed, select it and bring to center if needed
+    final existingIndex = currentPlaced.indexWhere((item) => item.foodItem.id == food.id);
+    if (existingIndex != -1) {
+      ref.read(selectedItemIdProvider.notifier).select(currentPlaced[existingIndex].id);
+      HapticFeedback.selectionClick();
+      return;
+    }
+
+    if (currentPlaced.length >= kMaxPlacedDishes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Table is full! Tap on a dish to replace or remove it.'),
+          duration: Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    // Position dish in lower-middle table area
+    final count = currentPlaced.length;
+    final offsetX = (count == 0) ? 0.0 : ((count % 2 == 1) ? -50.0 * count : 50.0 * count);
+    final targetX = (screenSize.width * 0.5) + offsetX;
+    final targetY = (screenSize.height * 0.52);
+
+    final uniqueId = 'dish_${food.id}_${DateTime.now().millisecondsSinceEpoch}';
+    final initialRot = vector.Vector4(1.0, 0.0, 0.0, 0.0);
+    final normPos = vector.Vector3(targetX / screenSize.width, 0.0, targetY / screenSize.height);
+
+    final placedItem = PlacedItem(
+      id: uniqueId,
+      foodItem: food,
+      rotation: initialRot,
+      position: normPos,
+    );
+
+    ref.read(placedItemsProvider.notifier).addItem(placedItem);
+    ref.read(selectedItemIdProvider.notifier).select(uniqueId);
+    _dishScreenOffsets[uniqueId] = Offset(targetX, targetY);
+    _dishRotations[uniqueId] = 0.0;
+    _dishScaleMultipliers[uniqueId] = 1.0;
+
+    HapticFeedback.lightImpact();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cameraController?.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final screenSize = MediaQuery.of(context).size;
 
-    // Resolve food item
-    final foods = ref.watch(foodListProvider).asData?.value ?? [];
-    final FoodItem? food = widget.initialFood ??
-        (widget.foodId != null
-            ? foods.firstWhere(
-                (item) => item.id == widget.foodId,
-                orElse: () => foods.isNotEmpty ? foods.first : throw Exception('Not found'),
-              )
-            : (foods.isNotEmpty ? foods.first : null));
-
-    // Handle Camera Permission Checking state
     if (_isCheckingPermission) {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
+          child: CircularProgressIndicator(color: Color(0xFFFF5722)),
         ),
       );
     }
 
-    // Handle Camera Permission Denied UI
     if (!_cameraPermission.isGranted) {
-      return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF101216) : Colors.white,
-        appBar: AppBar(
-          leading: IconButton(
-            icon: const Icon(Icons.close_rounded),
-            onPressed: () => context.pop(),
-          ),
-          title: const Text('AR Camera Access'),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.error.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.no_photography_outlined,
-                    size: 56,
-                    color: theme.colorScheme.error,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Camera Permission Needed',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Food AR requires camera access to scan your real dining table, detect horizontal surfaces, and project dishes at 1:1 real-world scale.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _checkCameraPermission,
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('Grant Camera Access'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: openAppSettings,
-                    icon: const Icon(Icons.settings_outlined),
-                    label: const Text('Open App Settings'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      return ArPermissionDeniedView(onRetry: _initCameraAndPermissions);
     }
 
-    // Camera is granted: Render AR Session
+    final placedItems = ref.watch(placedItemsProvider);
+    final selectedId = ref.watch(selectedItemIdProvider);
+    final allFoods = ref.watch(foodListProvider).asData?.value ?? [];
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          // Native AR Camera Canvas
-          Positioned.fill(
-            child: ARView(
-              onARViewCreated: _onARViewCreated,
-              planeDetectionConfig: PlaneDetectionConfig.horizontal,
-            ),
-          ),
-
-          // Top Header Bar
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
-            left: 16,
-            right: 16,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // ===================================================================
+          // Layer 1: 100% Fullscreen Camera + Dishes (Screenshot Boundary)
+          // ===================================================================
+          RepaintBoundary(
+            key: _repaintBoundaryKey,
+            child: Stack(
+              fit: StackFit.expand,
               children: [
-                // Close button
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white),
-                    onPressed: () => context.pop(),
-                    tooltip: 'Exit AR Mode',
-                  ),
-                ),
-
-                // Table Surface Detection Status Pill
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.75),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: _planeDetected ? const Color(0xFF10B981) : const Color(0xFFFFB300),
-                      width: 1.2,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _planeDetected ? Icons.check_circle : Icons.table_restaurant_outlined,
-                        size: 15,
-                        color: _planeDetected ? const Color(0xFF10B981) : const Color(0xFFFFB300),
+                // Clean Wide Camera Stream (Zero UI overlays on camera)
+                if (_isCameraInitialized && _cameraController != null)
+                  Positioned.fill(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      child: SizedBox(
+                        width: _cameraController!.value.previewSize?.height ?? screenSize.width,
+                        height: _cameraController!.value.previewSize?.width ?? screenSize.height,
+                        child: CameraPreview(_cameraController!),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _planeDetected ? 'Table Detected' : 'Scanning Surface...',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                    ),
+                  )
+                else if (_isCameraError)
+                  Positioned.fill(
+                    child: Container(
+                      color: const Color(0xFF161616),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.videocam_off_rounded, color: Color(0xFFFF5722), size: 44),
+                            const SizedBox(height: 12),
+                            Text(
+                              _cameraErrorMessage,
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF5722)),
+                              onPressed: _initCamera,
+                              child: const Text('Retry Camera'),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-
-                // Clear/Reset Model Action Button
-                if (_modelPlaced)
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                      onPressed: _clearPlacedModel,
-                      tooltip: 'Clear & Reposition',
                     ),
                   )
                 else
-                  const SizedBox(width: 48),
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black,
+                      child: const Center(
+                        child: CircularProgressIndicator(color: Color(0xFFFF5722)),
+                      ),
+                    ),
+                  ),
+
+                // Tap background to deselect active highlight
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      if (selectedId != null) {
+                        ref.read(selectedItemIdProvider.notifier).deselect();
+                      }
+                    },
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+
+                // Realistic Dishes Placed Directly on the Table
+                for (final item in placedItems)
+                  _buildPlacedDish(item, screenSize, selectedId == item.id),
               ],
             ),
           ),
 
-          // Guidance Overlay: "Move your phone slowly..." (Disappears once plane is found)
-          if (!_planeDetected)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 74,
-              left: 24,
-              right: 24,
-              child: Center(
+          // ===================================================================
+          // Layer 2: Ultra Minimal Top Navigation (Discreet & Translucent)
+          // ===================================================================
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    // Back Button
+                    _buildGlassCircleButton(
+                      icon: Icons.arrow_back_ios_new_rounded,
+                      onTap: () => context.pop(),
+                      tooltip: 'Back to Menu',
+                    ),
+                    const Spacer(),
+
+                    // Camera Snap & Share Photo of Table
+                    _buildGlassCircleButton(
+                      icon: Icons.camera_alt_rounded,
+                      color: const Color(0xFFFF5722),
+                      onTap: () => _controller.captureAndShareScreenshot(boundaryKey: _repaintBoundaryKey),
+                      tooltip: 'Snap Table Photo',
+                    ),
+                    const SizedBox(width: 10),
+
+                    // Cart / Checkout Button
+                    _buildGlassCircleButton(
+                      icon: Icons.shopping_bag_outlined,
+                      onTap: () {
+                        if (placedItems.isNotEmpty) {
+                          ref.read(cartProvider.notifier).addItemsFromPlacedDishes(placedItems);
+                        }
+                        context.push('/cart');
+                      },
+                      tooltip: 'Cart',
+                      badgeCount: placedItems.length,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ===================================================================
+          // Layer 3: Ultra Minimal Bottom Dish Selector
+          // Allows instant 1-tap switching without blocking the table!
+          // ===================================================================
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: MediaQuery.of(context).padding.bottom + 10,
+            child: Container(
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.50),
+                borderRadius: BorderRadius.circular(32),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: allFoods.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final food = allFoods[index];
+                  final isPlaced = placedItems.any((item) => item.foodItem.id == food.id);
+
+                  return InkWell(
+                    onTap: () {
+                      _selectOrPlaceDish(food);
+                    },
+                    borderRadius: BorderRadius.circular(26),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isPlaced
+                            ? const Color(0xFFFF5722)
+                            : Colors.white.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(26),
+                        border: Border.all(
+                          color: isPlaced ? Colors.white : Colors.white24,
+                          width: isPlaced ? 1.5 : 1.0,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipOval(
+                            child: SizedBox(
+                              width: 38,
+                              height: 38,
+                              child: CachedNetworkImage(
+                                imageUrl: food.thumbnailUrl,
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => Container(color: Colors.white12),
+                                errorWidget: (context, url, error) =>
+                                    const Icon(Icons.restaurant, color: Colors.white70, size: 20),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            food.name.split(' ').take(2).join(' '),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: isPlaced ? FontWeight.w800 : FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the realistic 3D dish placed directly on the table
+  /// (Exact same 3D model as shown in details screen, natural plate, no red borders!)
+  Widget _buildPlacedDish(PlacedItem item, Size screenSize, bool isSelected) {
+    final currentOffset = _dishScreenOffsets[item.id] ??
+        Offset(
+          item.position.x * screenSize.width,
+          item.position.z * screenSize.height,
+        );
+
+    final normalizedDepth = (currentOffset.dy / screenSize.height).clamp(0.20, 0.85);
+    final perspectiveScale = 0.70 + (normalizedDepth * 0.45);
+    final userScale = _dishScaleMultipliers[item.id] ?? 1.0;
+
+    final dishWidth = (screenSize.width * 0.80 * perspectiveScale * userScale).clamp(240.0, 360.0);
+    final dishHeight = dishWidth * 0.80;
+
+    return Positioned(
+      left: currentOffset.dx - (dishWidth / 2),
+      top: currentOffset.dy - (dishHeight / 2),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          ref.read(selectedItemIdProvider.notifier).toggle(item.id);
+          HapticFeedback.selectionClick();
+        },
+        onDoubleTap: () {
+          ref.read(placedItemsProvider.notifier).removeById(item.id);
+          _dishScreenOffsets.remove(item.id);
+          _dishRotations.remove(item.id);
+          _dishScaleMultipliers.remove(item.id);
+          HapticFeedback.mediumImpact();
+        },
+        onPanUpdate: (details) {
+          setState(() {
+            final newDx = (currentOffset.dx + details.delta.dx)
+                .clamp(dishWidth / 3, screenSize.width - (dishWidth / 3));
+            final newDy = (currentOffset.dy + details.delta.dy)
+                .clamp(screenSize.height * 0.10, screenSize.height * 0.80);
+
+            _dishScreenOffsets[item.id] = Offset(newDx, newDy);
+          });
+        },
+        child: SizedBox(
+          width: dishWidth,
+          height: dishHeight,
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              // 1. Realistic Table Contact Shadow (Deep directional dining shadow)
+              Positioned(
+                bottom: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  width: dishWidth * 0.90,
+                  height: dishHeight * 0.45,
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.82),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: const Color(0xFFFFB300).withValues(alpha: 0.6),
-                      width: 1,
+                    borderRadius: BorderRadius.all(
+                      Radius.elliptical(dishWidth * 0.90, dishHeight * 0.45),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.screen_rotation_outlined,
-                        color: Color(0xFFFFB300),
-                        size: 20,
-                      ),
-                      SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          'Move your phone slowly to detect your table',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
+                        color: Colors.black.withValues(alpha: 0.55),
+                        blurRadius: 32 * perspectiveScale,
+                        spreadRadius: 6,
+                        offset: Offset(0, 14 * perspectiveScale),
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
 
-          // Tap guidance after table is detected but model is not yet placed
-          if (_planeDetected && !_modelPlaced && !_isDownloadingModel)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 74,
-              left: 24,
-              right: 24,
-              child: Center(
+              // 2. Realistic 3D Perspective Ceramic Dining Platter (Natural, No Red Borders)
+              Positioned(
+                bottom: 12,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                  width: dishWidth * 0.92,
+                  height: dishHeight * 0.72,
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.6),
-                      width: 1,
+                    borderRadius: BorderRadius.all(
+                      Radius.elliptical(dishWidth * 0.92, dishHeight * 0.72),
                     ),
+                    // Fine porcelain / ceramic shaded plate rim
+                    gradient: const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0xFFFFFFFF),
+                        Color(0xFFF3F3F3),
+                        Color(0xFFE2E2E2),
+                        Color(0xFFCACACA),
+                      ],
+                      stops: [0.0, 0.35, 0.75, 1.0],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.20),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: dishWidth * 0.05,
+                      vertical: dishHeight * 0.04,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.all(
+                          Radius.elliptical(dishWidth * 0.82, dishHeight * 0.64),
+                        ),
+                        // Inner plate basin depth shadow
+                        gradient: const RadialGradient(
+                          center: Alignment(0.0, -0.1),
+                          colors: [
+                            Color(0xFFFFFFFF),
+                            Color(0xFFEFEFEF),
+                            Color(0xFFDCDCDC),
+                          ],
+                          stops: [0.0, 0.75, 1.0],
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.all(
+                          Radius.elliptical(dishWidth * 0.80, dishHeight * 0.62),
+                        ),
+                        child: CachedNetworkImage(
+                          imageUrl: item.foodItem.thumbnailUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: Colors.white24,
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFFF5722),
+                              ),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => const Center(
+                            child: Icon(
+                              Icons.restaurant_rounded,
+                              color: Colors.white70,
+                              size: 36,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // 3. Discreet Drag Handle at the bottom
+              Positioned(
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.50),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white12),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.touch_app_rounded,
-                        color: Color(0xFF10B981),
-                        size: 19,
-                      ),
-                      const SizedBox(width: 8),
+                      const Icon(Icons.drag_indicator_rounded, color: Colors.white70, size: 14),
+                      const SizedBox(width: 4),
                       Text(
-                        _statusMessage ?? 'Tap on the detected table grid to place dish',
+                        item.foodItem.name,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 12.5,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -523,173 +636,63 @@ class _ArScreenState extends ConsumerState<ArScreen> {
                   ),
                 ),
               ),
-            ),
-
-          // Model Downloading & Caching Progress Overlay
-          if (_isDownloadingModel)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.65),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1B1E28),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3.5,
-                            color: Color(0xFFFF5722),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        const Text(
-                          'Downloading 3D Model',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Caching via flutter_cache_manager...',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // Bottom Bar showing Selected Dish Info & Actions
-          if (food != null)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: MediaQuery.of(context).padding.bottom + 16,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF151822).withValues(alpha: 0.95),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    width: 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 20,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    // Dish Thumbnail
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: SizedBox(
-                        width: 58,
-                        height: 58,
-                        child: CachedNetworkImage(
-                          imageUrl: food.thumbnailUrl,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-
-                    // Dish Name & Real-World Dimensions
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            food.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            'Real scale: ${food.realWorldSizeCm.formattedDimensions}',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            food.formattedPrice,
-                            style: const TextStyle(
-                              color: Color(0xFFFF5722),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Add to Order Button
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF5722),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: () {
-                        ref.read(cartProvider.notifier).addItem(food);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Added ${food.name} to cart!'),
-                            duration: const Duration(seconds: 1),
-                            behavior: SnackBarBehavior.floating,
-                            action: SnackBarAction(
-                              label: 'View Cart',
-                              textColor: Colors.white,
-                              onPressed: () => context.push('/cart'),
-                            ),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        'Add to Cart',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  /// Minimal glass translucent circle button
+  Widget _buildGlassCircleButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+    Color? color,
+    int? badgeCount,
+  }) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        InkWell(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            onTap();
+          },
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: (color ?? Colors.black).withValues(alpha: 0.55),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+            ),
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+        ),
+        if (badgeCount != null && badgeCount > 0)
+          Positioned(
+            top: -2,
+            right: -2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF5722),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: Text(
+                '$badgeCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

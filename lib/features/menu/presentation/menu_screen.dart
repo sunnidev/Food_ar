@@ -163,7 +163,7 @@ class MenuScreen extends ConsumerWidget {
                       crossAxisCount: 2,
                       crossAxisSpacing: 14,
                       mainAxisSpacing: 14,
-                      childAspectRatio: 0.68,
+                      childAspectRatio: 0.63,
                     ),
                     itemCount: foods.length,
                     itemBuilder: (context, index) {

@@ -15,6 +15,15 @@ class FastTestFoodRepository implements FoodRepository {
 
   @override
   Future<List<String>> getCategories() async => const [AppConstants.categoryAll];
+
+  @override
+  Future<Map<String, dynamic>> submitOrder(Map<String, dynamic> orderPayload) async {
+    return {
+      'orderId': 'TEST-ORD-001',
+      'status': 'confirmed',
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+  }
 }
 
 void main() {
